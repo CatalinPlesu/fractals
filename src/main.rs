@@ -9,6 +9,7 @@ use macroquad::window::*;
 use egui;
 use num;
 // use rand::Rng;
+mod colorschemes;
 
 #[derive(Clone, Debug)]
 struct Point<T> {
@@ -33,11 +34,14 @@ struct Singleton {
     power: f64,
     scale: f64,
     max_iter: usize,
+    colorscheme: usize,
+    pallet: Vec<Color>,
     center: Point<f64>,
     offset: (Point<f32>, Point<f32>),
     refresh: bool,
     mouse_click: bool,
     egui: bool,
+    animation: bool,
 }
 
 impl Default for Singleton {
@@ -46,11 +50,43 @@ impl Default for Singleton {
             power: 2.,
             scale: 1.,
             max_iter: 55,
+            colorscheme: 0,
+            pallet: Vec::new(),
             center: Point { x: 0., y: 0. },
             offset: (Point { x: 0., y: 0. }, Point { x: 0., y: 0. }),
             refresh: false,
             mouse_click: false,
             egui: true,
+            animation: false,
+        }
+    }
+}
+
+impl Singleton {
+    fn generate_colors(&mut self) {
+        let colorscheme = colorschemes::colorschemes()[self.colorscheme].clone();
+        self.pallet = Vec::new();
+        let color = self.max_iter / (colorscheme.len() - 1);
+        for i in 0..(colorscheme.len() - 1) {
+            for j in 0..color {
+                self.pallet.push(Color::new(
+                    colorscheme[i].r
+                        + (colorscheme[i + 1].r - colorscheme[i].r)
+                            * (j as f32 / color as f32),
+                    colorscheme[i].g
+                        + (colorscheme[i + 1].g - colorscheme[i].g)
+                            * (j as f32 / color as f32),
+                    colorscheme[i].b
+                        + (colorscheme[i + 1].b - colorscheme[i].b)
+                            * (j as f32 / color as f32),
+                    colorscheme[i].a
+                        + (colorscheme[i + 1].b - colorscheme[i].b)
+                            * (j as f32 / color as f32),
+                ));
+            }
+        }
+        while self.pallet.len() <= self.max_iter {
+            self.pallet.push(BLACK);
         }
     }
 }
@@ -88,16 +124,7 @@ fn fractal(singl: &Singleton) -> Texture2D {
 
             let iter = mandelbrot(c, singl);
 
-            fractal.set_pixel(
-                x,
-                y,
-                Color::new(
-                    (3. * iter as f32) / 255.,
-                    (singl.max_iter as f32 - iter as f32) / 255.,
-                    (singl.max_iter as f32 - iter as f32) / 255.,
-                    1.,
-                ),
-            );
+            fractal.set_pixel(x, y, singl.pallet[iter]);
         }
     }
 
@@ -108,7 +135,8 @@ fn draw_menus(singl: &mut Singleton) {
     if singl.egui {
         egui_macroquad::ui(|egui_ctx| {
             egui::Window::new("Settings").show(egui_ctx, |ui| {
-                ui.add(egui::Slider::new(&mut singl.max_iter, 0..=500).text("Max iterations"));
+                ui.add(egui::Slider::new(&mut singl.scale, 1f64..=1_000_000f64).text("Zoom"));
+                ui.add(egui::Slider::new(&mut singl.max_iter, 0..=1_000).text("Max iterations"));
                 ui.add(egui::Slider::new(&mut singl.power, 0.0..=100.0).text("Power"));
                 if ui.button("Refresh").clicked() {
                     singl.refresh = true;
@@ -136,6 +164,10 @@ fn draw_menus(singl: &mut Singleton) {
                     }
                     .to_world(&singl)
                 ));
+
+                ui.collapsing("Colors", |ui| {
+                    ui.monospace(format!("{:#?}", singl.pallet.len()));
+                });
 
                 if ui.button("Reset").clicked() {
                     *singl = Singleton {
@@ -188,19 +220,31 @@ fn user_input(singl: &mut Singleton) {
     }
 
     if is_key_pressed(KeyCode::Escape) {
-        if singl.egui {
-            singl.egui = false;
-        } else {
-            singl.egui = true;
+        singl.egui = !singl.egui;
+    }
+
+    if is_key_pressed(KeyCode::Space) {
+        singl.animation = !singl.animation;
+    }
+
+    if is_key_pressed(KeyCode::Tab) {
+        singl.colorscheme += 1usize;
+        if singl.colorscheme >= colorschemes::colorschemes().len() {
+            singl.colorscheme = 0usize;
         }
+        singl.generate_colors();
+        singl.refresh = true;
     }
 }
 
 #[macroquad::main(window_conf)]
 async fn main() {
     let mut singl = Singleton {
+        power: 2.,
+        egui: false,
         ..Default::default()
     };
+    singl.generate_colors();
 
     let mut texture = fractal(&singl);
 
@@ -208,8 +252,16 @@ async fn main() {
         clear_background(LIGHTGRAY);
 
         if singl.refresh {
+            if singl.pallet.len() < singl.max_iter {
+                singl.generate_colors();
+            }
             texture = fractal(&singl);
             singl.refresh = false;
+        }
+
+        if singl.animation {
+            singl.power += 0.1;
+            singl.refresh = true;
         }
 
         draw_texture(texture, singl.offset.1.x, singl.offset.1.y, WHITE);
