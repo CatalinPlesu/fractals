@@ -9,6 +9,10 @@ use macroquad::window::*;
 use egui;
 use num;
 // use rand::Rng;
+use std::sync::{Arc, Mutex};
+use std::thread;
+use std::time::Duration;
+
 mod colorschemes;
 
 #[derive(Clone, Debug)]
@@ -42,6 +46,8 @@ struct Singleton {
     mouse_click: bool,
     egui: bool,
     animation: bool,
+    threads: usize,
+    bands: usize,
 }
 
 impl Default for Singleton {
@@ -58,6 +64,8 @@ impl Default for Singleton {
             mouse_click: false,
             egui: true,
             animation: false,
+            threads: 8,
+            bands: 32,
         }
     }
 }
@@ -71,17 +79,13 @@ impl Singleton {
             for j in 0..color {
                 self.pallet.push(Color::new(
                     colorscheme[i].r
-                        + (colorscheme[i + 1].r - colorscheme[i].r)
-                            * (j as f32 / color as f32),
+                        + (colorscheme[i + 1].r - colorscheme[i].r) * (j as f32 / color as f32),
                     colorscheme[i].g
-                        + (colorscheme[i + 1].g - colorscheme[i].g)
-                            * (j as f32 / color as f32),
+                        + (colorscheme[i + 1].g - colorscheme[i].g) * (j as f32 / color as f32),
                     colorscheme[i].b
-                        + (colorscheme[i + 1].b - colorscheme[i].b)
-                            * (j as f32 / color as f32),
+                        + (colorscheme[i + 1].b - colorscheme[i].b) * (j as f32 / color as f32),
                     colorscheme[i].a
-                        + (colorscheme[i + 1].b - colorscheme[i].b)
-                            * (j as f32 / color as f32),
+                        + (colorscheme[i + 1].b - colorscheme[i].b) * (j as f32 / color as f32),
                 ));
             }
         }
@@ -113,6 +117,32 @@ fn map_screen_to_world(singl: &Singleton) -> f64 {
 fn fractal(singl: &Singleton) -> Texture2D {
     let mut fractal = Image::gen_image_color(screen_width() as u16, screen_height() as u16, WHITE);
 
+    let mut bands = Vec::new();
+    for i in 0..singl.bands {
+        bands.push(i);
+    }
+
+    let mut images = Vec::new();
+    let band_height = screen_height() as usize / singl.bands;
+    for i in 0..singl.bands {
+        if i == singl.bands - 1 {
+            images.push(Image::gen_image_color(
+                (screen_height() as usize - i * band_height) as u16,
+                screen_height() as u16,
+                WHITE,
+            ));
+        } else {
+            images.push(Image::gen_image_color(
+                band_height as u16,
+                screen_height() as u16,
+                WHITE,
+            ));
+        }
+    }
+
+    let bands_mutex = Arc::new(Mutex::new(bands));
+    let images_mutex = Arc::new(Mutex::new(images));
+
     for x in 0..screen_width() as u32 {
         for y in 0..screen_height() as u32 {
             let point = Point::<f64> {
@@ -138,6 +168,8 @@ fn draw_menus(singl: &mut Singleton) {
                 ui.add(egui::Slider::new(&mut singl.scale, 1f64..=1_000_000f64).text("Zoom"));
                 ui.add(egui::Slider::new(&mut singl.max_iter, 0..=1_000).text("Max iterations"));
                 ui.add(egui::Slider::new(&mut singl.power, 0.0..=100.0).text("Power"));
+                ui.add(egui::Slider::new(&mut singl.threads, 1..=16).text("Threads"));
+                ui.add(egui::Slider::new(&mut singl.bands, singl.threads..=100).text("Bands"));
                 if ui.button("Refresh").clicked() {
                     singl.refresh = true;
                     singl.mouse_click = false;
@@ -148,22 +180,25 @@ fn draw_menus(singl: &mut Singleton) {
             egui::Window::new("Debugg info").show(egui_ctx, |ui| {
                 ui.label(format!("Scale: {}", singl.scale));
                 ui.label(format!("Iterations: {}", singl.max_iter));
-                ui.label(format!("Center: ({}, {})", singl.center.x, singl.center.y));
-                ui.label(format!(
-                    "Offset: ({}, {}), ({}, {})",
-                    singl.offset.0.x, singl.offset.0.y, singl.offset.1.x, singl.offset.1.y
-                ));
                 ui.label(format!("Refresh: {}", singl.refresh));
                 ui.label(format!("Mouse click: {}", singl.mouse_click));
-                ui.label(format!("Mouse position: {:?}", mouse_position()));
-                ui.label(format!(
-                    "World position: {:?}",
-                    Point::<f64> {
-                        x: mouse_position().0 as f64,
-                        y: mouse_position().1 as f64
-                    }
-                    .to_world(&singl)
-                ));
+
+                ui.collapsing("Positions", |ui| {
+                    ui.label(format!("Center: ({}, {})", singl.center.x, singl.center.y));
+                    ui.label(format!(
+                        "Offset: ({}, {}), ({}, {})",
+                        singl.offset.0.x, singl.offset.0.y, singl.offset.1.x, singl.offset.1.y
+                    ));
+                    ui.label(format!("Mouse position: {:?}", mouse_position()));
+                    ui.label(format!(
+                        "World position: {:?}",
+                        Point::<f64> {
+                            x: mouse_position().0 as f64,
+                            y: mouse_position().1 as f64
+                        }
+                        .to_world(&singl)
+                    ));
+                });
 
                 ui.collapsing("Colors", |ui| {
                     ui.monospace(format!("{:#?}", singl.pallet.len()));
@@ -175,6 +210,7 @@ fn draw_menus(singl: &mut Singleton) {
                     };
                 }
                 if ui.button("Center").clicked() {
+                    singl.center = Point::<f64> { x: 0., y: 0. };
                     singl.offset = (Point { x: 0., y: 0. }, Point { x: 0., y: 0. });
                     singl.mouse_click = false;
                 }
@@ -190,7 +226,7 @@ fn user_input(singl: &mut Singleton) {
     if singl.egui {
         draw_rectangle(0., 0., xrest, yrest, Color::new(0., 0., 0., 0.2));
     }
-    if mouse_position().0 > xrest || mouse_position().1 > yrest {
+    if mouse_position().0 > xrest || mouse_position().1 > yrest || !singl.egui {
         if is_mouse_button_pressed(MouseButton::Left) && !singl.mouse_click {
             let mouse = mouse_position();
             singl.offset.0.x = mouse.0;
@@ -276,7 +312,7 @@ async fn main() {
 fn window_conf() -> window::Conf {
     window::Conf {
         window_title: "GC Lab 2".to_owned(),
-        fullscreen: true,
+        // fullscreen: true,
         ..Default::default()
     }
 }
