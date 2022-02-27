@@ -114,51 +114,86 @@ fn map_screen_to_world(singl: &Singleton) -> f64 {
     return world_unit;
 }
 
-fn fractal(singl: &Singleton) -> Texture2D {
-    let mut fractal = Image::gen_image_color(screen_width() as u16, screen_height() as u16, WHITE);
-
+fn fractal(singl: &Singleton) -> Vec<Texture2D> {
     let mut bands = Vec::new();
     for i in 0..singl.bands {
         bands.push(i);
     }
 
     let mut images = Vec::new();
-    let band_height = screen_height() as usize / singl.bands;
-    for i in 0..singl.bands {
-        if i == singl.bands - 1 {
+    let mut band_height = screen_height() as usize / singl.bands;
+    band_height += band_height * singl.bands / 10;
+    for _ in 0..singl.bands {
             images.push(Image::gen_image_color(
-                (screen_height() as usize - i * band_height) as u16,
-                screen_height() as u16,
-                WHITE,
-            ));
-        } else {
-            images.push(Image::gen_image_color(
+                screen_width() as u16,
                 band_height as u16,
-                screen_height() as u16,
                 WHITE,
             ));
         }
-    }
+    
 
     let bands_mutex = Arc::new(Mutex::new(bands));
     let images_mutex = Arc::new(Mutex::new(images));
+    let singl_mutex = Arc::new(singl.clone());
 
-    for x in 0..screen_width() as u32 {
-        for y in 0..screen_height() as u32 {
-            let point = Point::<f64> {
-                x: x as f64,
-                y: y as f64,
+    let mut handles = Vec::new();
+    for _ in 0..singl.threads {
+        let singl_clone = Arc::clone(&singl_mutex);
+        let bands_clone = Arc::clone(&bands_mutex);
+        let images_clone = Arc::clone(&images_mutex);
+        let handle = thread::spawn(move || {
+            let local_singl = singl_clone;
+            loop {
+                let mut bands = bands_clone.lock().unwrap();
+                if bands.len() == 0 {
+                    break;
+                }
+                let index = bands.remove(0);
+                drop(bands);
+
+                let images = images_clone.lock().unwrap();
+                let width = images[index].width();
+                let height = images[index].height();
+                drop(images);
+
+                let mut fractal = Image::gen_image_color(width as u16, height as u16, WHITE);
+
+                for x in 0..screen_width() as u32 {
+                    for y in 0..height as u32 {
+                        let point = Point::<f64> {
+                            x: x as f64,
+                            y: (index * height) as f64 + y as f64,
+                        }
+                        .to_world(&local_singl);
+                        let c = num::complex::Complex::<f64>::new(point.x, point.y);
+
+                        let iter = mandelbrot(c, &local_singl);
+
+                        fractal.set_pixel(x, y, local_singl.pallet[iter]);
+                    }
+                }
+
+                let mut images = images_clone.lock().unwrap();
+                images[index] = fractal;
+                drop(images);
+                thread::sleep(Duration::from_millis(1));
             }
-            .to_world(&singl);
-            let c = num::complex::Complex::<f64>::new(point.x, point.y);
-
-            let iter = mandelbrot(c, singl);
-
-            fractal.set_pixel(x, y, singl.pallet[iter]);
-        }
+        });
+        handles.push(handle);
     }
 
-    return Texture2D::from_image(&fractal);
+    for h in handles {
+        h.join().unwrap();
+    }
+
+    let mut textures = Vec::new();
+    let images_clone = Arc::clone(&images_mutex);
+    let images = images_clone.lock().unwrap();
+    for i in 0..singl.bands {
+        textures.push(Texture2D::from_image(&images[i]));
+    }
+    drop(images);
+    return textures;
 }
 
 fn draw_menus(singl: &mut Singleton) {
@@ -169,7 +204,7 @@ fn draw_menus(singl: &mut Singleton) {
                 ui.add(egui::Slider::new(&mut singl.max_iter, 0..=1_000).text("Max iterations"));
                 ui.add(egui::Slider::new(&mut singl.power, 0.0..=100.0).text("Power"));
                 ui.add(egui::Slider::new(&mut singl.threads, 1..=16).text("Threads"));
-                ui.add(egui::Slider::new(&mut singl.bands, singl.threads..=100).text("Bands"));
+
                 if ui.button("Refresh").clicked() {
                     singl.refresh = true;
                     singl.mouse_click = false;
@@ -282,7 +317,7 @@ async fn main() {
     };
     singl.generate_colors();
 
-    let mut texture = fractal(&singl);
+    let mut textures = fractal(&singl);
 
     loop {
         clear_background(LIGHTGRAY);
@@ -291,7 +326,7 @@ async fn main() {
             if singl.pallet.len() < singl.max_iter {
                 singl.generate_colors();
             }
-            texture = fractal(&singl);
+            textures = fractal(&singl);
             singl.refresh = false;
         }
 
@@ -300,7 +335,14 @@ async fn main() {
             singl.refresh = true;
         }
 
-        draw_texture(texture, singl.offset.1.x, singl.offset.1.y, WHITE);
+        for i in 0..singl.bands {
+            draw_texture(
+                textures[i],
+                0.,
+                i as f32 * textures[i].height(),
+                WHITE,
+            );
+        }
 
         user_input(&mut singl);
         draw_menus(&mut singl);
