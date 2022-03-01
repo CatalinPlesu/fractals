@@ -362,7 +362,7 @@ async fn main() {
 fn window_conf() -> window::Conf {
     window::Conf {
         window_title: "GC Lab 2".to_owned(),
-        // fullscreen: true,
+        fullscreen: true,
         ..Default::default()
     }
 }
