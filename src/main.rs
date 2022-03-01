@@ -41,6 +41,7 @@ struct Singleton {
     colorscheme: usize,
     pallet: Vec<Color>,
     center: Point<f64>,
+    julia: Point<f64>,
     offset: (Point<f32>, Point<f32>),
     refresh: bool,
     last_refresh: Instant,
@@ -62,6 +63,7 @@ impl Default for Singleton {
             colorscheme: 0,
             pallet: Vec::new(),
             center: Point { x: 0., y: 0. },
+            julia: Point { x: 0., y: 0. },
             offset: (Point { x: 0., y: 0. }, Point { x: 0., y: 0. }),
             refresh: false,
             last_refresh: Instant::now(),
@@ -102,7 +104,7 @@ impl Singleton {
 }
 
 fn mandelbrot(c: num::complex::Complex<f64>, singl: &Singleton) -> usize {
-    let mut z = num::complex::Complex::<f64>::new(0.0, 0.0);
+    let mut z = num::complex::Complex::<f64>::new(singl.julia.x, singl.julia.y);
     let mut i: usize = 0;
     while i < singl.max_iter && z.l1_norm() <= 4f64 {
         z = z.powf(singl.power) + c;
@@ -213,7 +215,9 @@ fn draw_menus(singl: &mut Singleton) {
                     egui::Slider::new(&mut singl.animation_unit, 0.0001..=0.1)
                         .text("Animation unit"),
                 );
-                ui.add(egui::Slider::new(&mut singl.refresh_limit, 10..=10000).text("Redraw delay"));
+                ui.add(
+                    egui::Slider::new(&mut singl.refresh_limit, 10..=10000).text("Redraw delay"),
+                );
 
                 if ui.button("Refresh").clicked() {
                     singl.refresh = true;
@@ -278,6 +282,16 @@ fn user_input(singl: &mut Singleton) {
         draw_rectangle(0., 0., xrest, yrest, Color::new(0., 0., 0., 0.2));
     }
     if mouse_position().0 > xrest || mouse_position().1 > yrest || !singl.egui {
+        if is_mouse_button_pressed(MouseButton::Right)
+        {
+            let mouse = mouse_position();
+            singl.julia = Point::<f64> {
+                x: mouse.0 as f64,
+                y: mouse.1 as f64,
+            }
+            .to_world(&singl);
+            singl.refresh = true;
+        }
         if is_mouse_button_pressed(MouseButton::Left) && !singl.mouse_click {
             let mouse = mouse_position();
             singl.center = Point::<f64> {
@@ -331,16 +345,16 @@ async fn main() {
     loop {
         clear_background(LIGHTGRAY);
 
-        if singl.last_refresh.elapsed().as_millis() > singl.refresh_limit as u128 || singl.refresh{
+        if singl.last_refresh.elapsed().as_millis() > singl.refresh_limit as u128 || singl.refresh {
             // if singl.refresh {
-                if singl.pallet.len() < singl.max_iter {
-                    singl.generate_colors();
-                }
+            if singl.pallet.len() < singl.max_iter {
+                singl.generate_colors();
+            }
 
-                textures = fractal(&singl);
+            textures = fractal(&singl);
 
-                singl.last_refresh = Instant::now();
-                singl.refresh = false;
+            singl.last_refresh = Instant::now();
+            singl.refresh = false;
             // }
 
             if singl.animation {
