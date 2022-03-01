@@ -8,6 +8,10 @@ pub fn colorschemes() -> Vec<Vec<Color>> {
             Color::from_rgba(218, 219, 189, 255),
         ],
         vec![
+            Color::from_rgba(17, 20, 207, 255),
+            Color::from_rgba(217, 35, 22, 255),
+        ],
+        vec![
             Color::from_rgba(0, 7, 100, 255),
             Color::from_rgba(32, 107, 203, 255),
             Color::from_rgba(237, 255, 255, 255),

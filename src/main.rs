@@ -11,7 +11,7 @@ use num;
 // use rand::Rng;
 use std::sync::{Arc, Mutex};
 use std::thread;
-use std::time::Duration;
+use std::time::{Duration, Instant};
 
 mod colorschemes;
 
@@ -43,9 +43,12 @@ struct Singleton {
     center: Point<f64>,
     offset: (Point<f32>, Point<f32>),
     refresh: bool,
+    last_refresh: Instant,
+    refresh_limit: u64,
     mouse_click: bool,
     egui: bool,
     animation: bool,
+    animation_unit: f64,
     threads: usize,
     bands: usize,
 }
@@ -61,9 +64,12 @@ impl Default for Singleton {
             center: Point { x: 0., y: 0. },
             offset: (Point { x: 0., y: 0. }, Point { x: 0., y: 0. }),
             refresh: false,
+            last_refresh: Instant::now(),
+            refresh_limit: 100,
             mouse_click: false,
             egui: true,
             animation: false,
+            animation_unit: 0.05,
             threads: 8,
             bands: 32,
         }
@@ -124,13 +130,12 @@ fn fractal(singl: &Singleton) -> Vec<Texture2D> {
     let mut band_height = screen_height() as usize / singl.bands;
     band_height += band_height * singl.bands / 10;
     for _ in 0..singl.bands {
-            images.push(Image::gen_image_color(
-                screen_width() as u16,
-                band_height as u16,
-                WHITE,
-            ));
-        }
-    
+        images.push(Image::gen_image_color(
+            screen_width() as u16,
+            band_height as u16,
+            WHITE,
+        ));
+    }
 
     let bands_mutex = Arc::new(Mutex::new(bands));
     let images_mutex = Arc::new(Mutex::new(images));
@@ -204,6 +209,11 @@ fn draw_menus(singl: &mut Singleton) {
                 ui.add(egui::Slider::new(&mut singl.max_iter, 0..=1_000).text("Max iterations"));
                 ui.add(egui::Slider::new(&mut singl.power, 0.0..=100.0).text("Power"));
                 ui.add(egui::Slider::new(&mut singl.threads, 1..=16).text("Threads"));
+                ui.add(
+                    egui::Slider::new(&mut singl.animation_unit, 0.0001..=0.1)
+                        .text("Animation unit"),
+                );
+                ui.add(egui::Slider::new(&mut singl.refresh_limit, 10..=1000).text("Redraw delay"));
 
                 if ui.button("Refresh").clicked() {
                     singl.refresh = true;
@@ -256,6 +266,9 @@ fn draw_menus(singl: &mut Singleton) {
 }
 
 fn user_input(singl: &mut Singleton) {
+    if singl.refresh {
+        return;
+    }
     let xrest = 300.;
     let yrest = 400.;
     if singl.egui {
@@ -264,25 +277,17 @@ fn user_input(singl: &mut Singleton) {
     if mouse_position().0 > xrest || mouse_position().1 > yrest || !singl.egui {
         if is_mouse_button_pressed(MouseButton::Left) && !singl.mouse_click {
             let mouse = mouse_position();
-            singl.offset.0.x = mouse.0;
-            singl.offset.0.y = mouse.1;
-            singl.mouse_click = true;
-
-            singl.mouse_click = true;
             singl.center = Point::<f64> {
                 x: mouse.0 as f64,
                 y: mouse.1 as f64,
             }
             .to_world(&singl);
+            singl.refresh = true;
         }
-        if is_mouse_button_released(MouseButton::Left) && singl.mouse_click {
-            let mouse = mouse_position();
-            singl.offset.1.x -= singl.offset.0.x - mouse.0;
-            singl.offset.1.y -= singl.offset.0.y - mouse.1;
-            singl.mouse_click = false;
-        }
+
         if mouse_wheel().1 != 0. {
             singl.scale += singl.scale * (mouse_wheel().1 / 10.) as f64;
+            singl.refresh = true;
         }
     }
 
@@ -322,26 +327,26 @@ async fn main() {
     loop {
         clear_background(LIGHTGRAY);
 
-        if singl.refresh {
-            if singl.pallet.len() < singl.max_iter {
-                singl.generate_colors();
-            }
-            textures = fractal(&singl);
-            singl.refresh = false;
-        }
+        if singl.last_refresh.elapsed().as_millis() > singl.refresh_limit as u128 {
+            if singl.refresh {
+                if singl.pallet.len() < singl.max_iter {
+                    singl.generate_colors();
+                }
 
-        if singl.animation {
-            singl.power += 0.1;
-            singl.refresh = true;
+                textures = fractal(&singl);
+
+                singl.refresh = false;
+                singl.last_refresh = Instant::now();
+            }
+
+            if singl.animation {
+                singl.power += singl.animation_unit;
+                singl.refresh = true;
+            }
         }
 
         for i in 0..singl.bands {
-            draw_texture(
-                textures[i],
-                0.,
-                i as f32 * textures[i].height(),
-                WHITE,
-            );
+            draw_texture(textures[i], 0., i as f32 * textures[i].height(), WHITE);
         }
 
         user_input(&mut singl);
