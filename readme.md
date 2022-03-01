@@ -1,3 +1,13 @@
+# fractals in rust
 
-# inspiration
-https://www.gcardone.net/2021-03-04-blistering-fast-mandelbrot-in-rust/
+### contains:
+- mandelbrot
+
+### usage:
+    tab                     - change color scheme
+    mose click              - change center of the world
+    wheele                  - zoom
+    esc                     - settings
+    space                   - toggle animation
+
+![preview](fractal.png)
