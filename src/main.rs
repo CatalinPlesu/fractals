@@ -69,7 +69,7 @@ impl Default for Singleton {
             mouse_click: false,
             egui: true,
             animation: false,
-            animation_unit: 0.05,
+            animation_unit: 0.01,
             threads: 8,
             bands: 32,
         }
@@ -213,12 +213,15 @@ fn draw_menus(singl: &mut Singleton) {
                     egui::Slider::new(&mut singl.animation_unit, 0.0001..=0.1)
                         .text("Animation unit"),
                 );
-                ui.add(egui::Slider::new(&mut singl.refresh_limit, 10..=1000).text("Redraw delay"));
+                ui.add(egui::Slider::new(&mut singl.refresh_limit, 10..=10000).text("Redraw delay"));
 
                 if ui.button("Refresh").clicked() {
                     singl.refresh = true;
                     singl.mouse_click = false;
                     singl.offset = (Point { x: 0., y: 0. }, Point { x: 0., y: 0. });
+                }
+                if ui.button("Animation on/off").clicked() {
+                    singl.animation = !singl.animation;
                 }
             });
 
@@ -287,7 +290,8 @@ fn user_input(singl: &mut Singleton) {
 
         if mouse_wheel().1 != 0. {
             singl.scale += singl.scale * (mouse_wheel().1 / 10.) as f64;
-            singl.refresh = true;
+            // singl.refresh = true;
+            singl.last_refresh = Instant::now();
         }
     }
 
@@ -327,21 +331,20 @@ async fn main() {
     loop {
         clear_background(LIGHTGRAY);
 
-        if singl.last_refresh.elapsed().as_millis() > singl.refresh_limit as u128 {
-            if singl.refresh {
+        if singl.last_refresh.elapsed().as_millis() > singl.refresh_limit as u128 || singl.refresh{
+            // if singl.refresh {
                 if singl.pallet.len() < singl.max_iter {
                     singl.generate_colors();
                 }
 
                 textures = fractal(&singl);
 
-                singl.refresh = false;
                 singl.last_refresh = Instant::now();
-            }
+                singl.refresh = false;
+            // }
 
             if singl.animation {
                 singl.power += singl.animation_unit;
-                singl.refresh = true;
             }
         }
 
