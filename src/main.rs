@@ -282,8 +282,7 @@ fn user_input(singl: &mut Singleton) {
         draw_rectangle(0., 0., xrest, yrest, Color::new(0., 0., 0., 0.2));
     }
     if mouse_position().0 > xrest || mouse_position().1 > yrest || !singl.egui {
-        if is_mouse_button_pressed(MouseButton::Right)
-        {
+        if is_mouse_button_pressed(MouseButton::Right) {
             let mouse = mouse_position();
             singl.julia = Point::<f64> {
                 x: mouse.0 as f64,
@@ -345,8 +344,11 @@ async fn main() {
     loop {
         clear_background(LIGHTGRAY);
 
-        if singl.last_refresh.elapsed().as_millis() > singl.refresh_limit as u128 || singl.refresh {
-            // if singl.refresh {
+        if singl.last_refresh.elapsed().as_millis() > singl.refresh_limit as u128 {
+            singl.refresh = true;
+        }
+
+        if singl.refresh {
             if singl.pallet.len() < singl.max_iter {
                 singl.generate_colors();
             }
@@ -355,11 +357,10 @@ async fn main() {
 
             singl.last_refresh = Instant::now();
             singl.refresh = false;
-            // }
+        }
 
-            if singl.animation {
-                singl.power += singl.animation_unit;
-            }
+        if singl.animation {
+            singl.power += singl.animation_unit;
         }
 
         for i in 0..singl.bands {
